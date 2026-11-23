@@ -38,9 +38,11 @@
 # kernel's source (the workflow reports it apart), 1 any other failure.
 #
 # Debian/Ubuntu packages: gcc-10-arm-linux-gnueabihf (or any
-# arm-linux-gnueabihf gcc >= 8) binutils-arm-linux-gnueabihf make flex
-# bison bc libssl-dev libelf-dev lz4 git python3 (kimage.py needs lz4,
-# lzop for those compressions).
+# arm-linux-gnueabihf gcc >= 8) with its plugin headers
+# (gcc-10-plugin-dev-arm-linux-gnueabihf: the stock kernels set
+# GCC_PLUGINS, which the build needs a plugin-capable compiler to keep)
+# binutils-arm-linux-gnueabihf make flex bison bc libssl-dev libelf-dev
+# lz4 git python3 (kimage.py needs lz4, lzop for those compressions).
 
 set -euo pipefail
 

@@ -92,7 +92,7 @@ jobs:
           scripts/free-disk.sh
           sudo apt-get update -q
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
-            gcc-10-arm-linux-gnueabihf binutils-arm-linux-gnueabihf \
+            gcc-10-arm-linux-gnueabihf gcc-10-plugin-dev-arm-linux-gnueabihf binutils-arm-linux-gnueabihf \
             make flex bison bc libssl-dev libelf-dev lz4 lzop p7zip-full jq
       - name: Download the Linux release
         env:
