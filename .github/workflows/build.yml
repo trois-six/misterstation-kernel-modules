@@ -9,9 +9,10 @@ name: build
 # undefined symbol exported by the stock kernel), and publishes them as a
 # release with the corresponding source. Every run then regenerates the
 # Downloader database (db.json.zip on the `db` branch) from the index of
-# the newest kernels, validates it with Downloader's own code, installs it
-# with Downloader, and publishes it when it changed. A failed build, patch
-# or database opens an issue.
+# the newest kernels, validates it with Downloader's own code and installs
+# it with Downloader (job `database`, which has no write access), and a
+# last job publishes what was validated when it changed. A failed build,
+# patch or database opens an issue.
 on:
   push:
     branches: [main]
@@ -29,16 +30,19 @@ on:
         type: string
         default: ""
 
+# The least every job gets; a job that needs more says so (the two that
+# publish: `build` for the release, `publish` for the `db` branch and the
+# pruning). `GH_TOKEN` likewise is set on the steps that call `gh`, not on
+# the workflow: the build steps, which run the downloaded kernel's own
+# makefiles, never see it.
 permissions:
-  contents: write
-  issues: write
+  contents: read
 
 concurrency:
   group: build-modules
   cancel-in-progress: false
 
 env:
-  GH_TOKEN: ${{ github.token }}
   GH_REPO: ${{ github.repository }}
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
@@ -46,6 +50,8 @@ jobs:
   detect:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       build: ${{ steps.detect.outputs.build }}
       url: ${{ steps.detect.outputs.url }}
@@ -53,7 +59,7 @@ jobs:
       md5: ${{ steps.detect.outputs.md5 }}
       recipe: ${{ steps.detect.outputs.recipe }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Read Distribution's Linux release and the published index
         id: detect
         env:
@@ -82,11 +88,15 @@ jobs:
     if: needs.detect.outputs.build == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    # publishes the release of the modules, and reports a failure
+    permissions:
+      contents: write
+      issues: write
     env:
       VERSION: ${{ needs.detect.outputs.version }}
       RECIPE: ${{ needs.detect.outputs.recipe }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install the toolchain
         run: |
           scripts/free-disk.sh
@@ -163,6 +173,7 @@ jobs:
       - name: Publish the release
         if: steps.kernel.outputs.built == 'false'
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.kernel.outputs.tag }}
           RELEASE: ${{ steps.kernel.outputs.release }}
           BUILD_TIME: ${{ steps.kernel.outputs.build_time }}
@@ -191,7 +202,7 @@ jobs:
             target/package/manifest.json target/package/*.ko target/linux-source-*.tar.gz target/recipe.tar.gz
           cat record/record.json
       - name: Upload the build record
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: record
           path: record/record.json
@@ -199,13 +210,14 @@ jobs:
           retention-days: 7
       - name: Close the failure issues
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE: ${{ steps.kernel.outputs.release }}
         run: |
           scripts/report-issue.sh close "Build failed: linux_release $VERSION" "Built in $RUN_URL."
           scripts/report-issue.sh close "Patch does not apply: $RELEASE" "The patches apply again ($RUN_URL)."
       - name: Upload the log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: build-log
           path: target/build.log
@@ -214,6 +226,7 @@ jobs:
       - name: Open an issue
         if: failure() || cancelled()
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE: ${{ steps.kernel.outputs.release }}
         run: |
           {
@@ -234,17 +247,27 @@ jobs:
           fi
 
   database:
-    # Regenerated from the index on every run, built or not, and pushed
-    # only when it changed. A failed build leaves it as it was.
+    # Regenerated from the index on every run, built or not. Generated and
+    # validated here without write access: `publish` pushes exactly what
+    # this job validated, so Downloader's own code (cloned from upstream
+    # and run against the database) never runs in a job that can write to
+    # this repository. A failed build leaves the published database as it
+    # was.
     needs: [detect, build]
     if: always() && !cancelled() && needs.detect.result == 'success' && needs.build.result != 'failure'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      state: ${{ steps.make.outputs.state }}
+      branch: ${{ steps.make.outputs.branch }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Download the build record
         if: needs.build.result == 'success'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: record
           path: ${{ runner.temp }}/record
@@ -314,10 +337,46 @@ jobs:
               sys.exit(f"::error::Downloader did not install the database as expected: missing {bad}, extra {sorted(extra)}")
           print(f"Downloader installed the {len(db['files'])} files")
           PY
-      - name: Publish the database
-        if: steps.make.outputs.state == 'changed'
+      - name: Upload the database
+        if: steps.make.outputs.state != 'none'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: database
+          path: ${{ runner.temp }}/db
+          if-no-files-found: error
+          retention-days: 7
+      - name: Open an issue
+        if: failure()
         env:
-          BRANCH: ${{ steps.make.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s\n' "The Downloader database could not be generated or validated; the published one is unchanged." \
+            "" "Run: $RUN_URL" > "$RUNNER_TEMP/body.md"
+          scripts/report-issue.sh open "Database check failed" "$RUNNER_TEMP/body.md" database-failure
+
+  publish:
+    # The only job that writes to this repository besides the release of
+    # `build`: it pushes the database `database` validated (pushed only
+    # when it changed) and prunes the releases the index no longer lists.
+    needs: database
+    if: needs.database.result == 'success' && needs.database.outputs.state != 'none'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+    env:
+      BRANCH: ${{ needs.database.outputs.branch }}
+      STATE: ${{ needs.database.outputs.state }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Download the database
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: database
+          path: ${{ runner.temp }}/db
+      - name: Publish the database
+        if: needs.database.outputs.state == 'changed'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -342,9 +401,8 @@ jobs:
           git -C "$wt" commit -q -m "chore(db): update the database ($n kernels)" -m "Run: $RUN_URL"
           git -C "$wt" push origin "HEAD:refs/heads/$BRANCH"
       - name: Check the published database
-        if: steps.make.outputs.state != 'none'
         env:
-          BRANCH: ${{ steps.make.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh api -H "Accept: application/vnd.github.raw" "repos/$GH_REPO/contents/db.json.zip?ref=$BRANCH" > "$RUNNER_TEMP/published.zip"
@@ -354,7 +412,8 @@ jobs:
       - name: Prune old builds
         # Keeps the releases of the builds the index lists (the newest
         # kernels, config.json's keep); older ones and their tags go.
-        if: steps.make.outputs.state != 'none'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release list --limit 1000 --json tagName > "$RUNNER_TEMP/releases.json"
@@ -372,7 +431,9 @@ jobs:
           scripts/report-issue.sh close "Database check failed" "The database is valid again ($RUN_URL)."
       - name: Open an issue
         if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          printf '%s\n' "The Downloader database could not be generated, validated or published; the published one is unchanged." \
+          printf '%s\n' "The Downloader database could not be published or checked; see the run." \
             "" "Run: $RUN_URL" > "$RUNNER_TEMP/body.md"
           scripts/report-issue.sh open "Database check failed" "$RUNNER_TEMP/body.md" database-failure

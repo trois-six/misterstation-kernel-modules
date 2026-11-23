@@ -147,13 +147,25 @@ recipe and by hand:
   the corresponding source.
 * **database**: merges the build into `index.json`, keeps the 3 newest
   kernels, generates `db.json.zip`, validates it with Downloader's own
-  code (`scripts/check-db.py`), installs it with Downloader into a
+  code (`scripts/check-db.py`) and installs it with Downloader into a
   scratch directory (every file downloaded from its release with
-  Downloader's MD5 and size checks), publishes it on the `db` branch
-  when it changed and deletes the releases of dropped builds.
+  Downloader's MD5 and size checks). It runs without write access: the
+  upstream code it clones and runs cannot touch this repository.
+* **publish**: pushes on the `db` branch the database **database**
+  validated, when it changed, checks what was published and deletes the
+  releases of dropped builds.
 * A failed build, a patch that no longer applies to a new kernel, or a
   database that does not validate opens an issue (closed by the next
   successful run).
+
+The workflow's token can only read, except in the two jobs that publish
+(**build** for the release, **publish** for the `db` branch and the
+pruning), and it is given to the steps that call `gh` alone, so the build
+of the downloaded kernel never sees it. The actions it uses are pinned to
+a commit, and what it reads from Distribution's database (the Linux
+release's URL, version and MD5) and from the kernel image (its release)
+has to match a strict format before it reaches a shell, a tag or a
+database path.
 
 ## Security
 
