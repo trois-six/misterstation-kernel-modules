@@ -84,7 +84,14 @@ done
 | `videobuf2-common.ko`, `videobuf2-memops.ko`, `videobuf2-vmalloc.ko`, `videobuf2-v4l2.ko` | video buffers (MMAP and USERPTR) |
 | `uvc.ko`, `uvcvideo.ko` | USB video class driver |
 
-About 0.6 MB in all. Two patches (`recipe/patches/`):
+About 0.6 MB in all. The first build, for linux_release 260912 (kernel
+`6.18.38-MiSTer`, id `3a53fb98bca8210a`, source commit `6a581bac4`), is
+the release
+[`6.18.38-MiSTer_3a53fb98bca8210a_417caced`](https://github.com/trois-six/misterstation-kernel-modules/releases/tag/6.18.38-MiSTer_3a53fb98bca8210a_417caced):
+its ABI check found the 2128 built-in objects identical with and without
+the media options and the 9723 exports equal to the stock image's.
+
+Two patches (`recipe/patches/`):
 
 * `0001-media-videobuf2-build-without-dma-buf.patch`: videobuf2 builds
   without `DMA_SHARED_BUFFER`, a bool the stock kernel lacks (selecting
