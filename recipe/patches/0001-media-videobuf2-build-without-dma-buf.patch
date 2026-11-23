@@ -1,0 +1,128 @@
+diff --git a/drivers/media/common/videobuf2/Kconfig b/drivers/media/common/videobuf2/Kconfig
+index d2223a12c..94731d098 100644
+--- a/drivers/media/common/videobuf2/Kconfig
++++ b/drivers/media/common/videobuf2/Kconfig
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ # Used by drivers that need Videobuf2 modules
+ config VIDEOBUF2_CORE
+-	select DMA_SHARED_BUFFER
++	select DMA_SHARED_BUFFER if !VIDEOBUF2_NO_DMA_SHARED_BUFFER
+ 	tristate
+ 
+ config VIDEOBUF2_V4L2
+@@ -20,7 +20,16 @@ config VIDEOBUF2_VMALLOC
+ 	tristate
+ 	select VIDEOBUF2_CORE
+ 	select VIDEOBUF2_MEMOPS
+-	select DMA_SHARED_BUFFER
++	select DMA_SHARED_BUFFER if !VIDEOBUF2_NO_DMA_SHARED_BUFFER
++
++config VIDEOBUF2_NO_DMA_SHARED_BUFFER
++	bool "Build videobuf2 without dma-buf (DMABUF) support"
++	help
++	  Lets videobuf2-core and videobuf2-vmalloc be built as modules for
++	  a kernel built without DMA_SHARED_BUFFER, which cannot be a
++	  module: DMABUF queues and buffer exports are then refused
++	  (EINVAL); MMAP and USERPTR buffers work as before. Say N unless
++	  the modules are built for a kernel that lacks dma-buf.
+ 
+ config VIDEOBUF2_DMA_SG
+ 	tristate
+diff --git a/drivers/media/common/videobuf2/videobuf2-core.c b/drivers/media/common/videobuf2/videobuf2-core.c
+index 2df566f40..3a57ba911 100644
+--- a/drivers/media/common/videobuf2/videobuf2-core.c
++++ b/drivers/media/common/videobuf2/videobuf2-core.c
+@@ -300,7 +300,8 @@ static void __vb2_buf_userptr_put(struct vb2_buffer *vb)
+  */
+ static void __vb2_plane_dmabuf_put(struct vb2_buffer *vb, struct vb2_plane *p)
+ {
+-	if (!p->mem_priv)
++	/* No DMABUF plane exists without dma-buf support. */
++	if (!IS_ENABLED(CONFIG_DMA_SHARED_BUFFER) || !p->mem_priv)
+ 		return;
+ 
+ 	if (!p->dbuf_duplicated) {
+@@ -772,7 +773,8 @@ static int __verify_mmap_ops(struct vb2_queue *q)
+  */
+ static int __verify_dmabuf_ops(struct vb2_queue *q)
+ {
+-	if (!(q->io_modes & VB2_DMABUF) || !q->mem_ops->attach_dmabuf ||
++	if (!IS_ENABLED(CONFIG_DMA_SHARED_BUFFER) ||
++	    !(q->io_modes & VB2_DMABUF) || !q->mem_ops->attach_dmabuf ||
+ 	    !q->mem_ops->detach_dmabuf  || !q->mem_ops->map_dmabuf ||
+ 	    !q->mem_ops->unmap_dmabuf)
+ 		return -EINVAL;
+@@ -1387,6 +1389,10 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
+ 	int ret = 0;
+ 	bool reacquired = vb->planes[0].mem_priv == NULL;
+ 
++	/* DMABUF queues are refused by __verify_dmabuf_ops() then. */
++	if (!IS_ENABLED(CONFIG_DMA_SHARED_BUFFER))
++		return -EINVAL;
++
+ 	memset(planes, 0, sizeof(planes[0]) * vb->num_planes);
+ 	/* Copy relevant information provided by the userspace */
+ 	ret = call_bufop(vb->vb2_queue, fill_vb2_buffer,
+@@ -2443,7 +2449,7 @@ int vb2_core_expbuf(struct vb2_queue *q, int *fd, unsigned int type,
+ 		return -EINVAL;
+ 	}
+ 
+-	if (!q->mem_ops->get_dmabuf) {
++	if (!IS_ENABLED(CONFIG_DMA_SHARED_BUFFER) || !q->mem_ops->get_dmabuf) {
+ 		dprintk(q, 1, "queue does not support DMA buffer exporting\n");
+ 		return -EINVAL;
+ 	}
+diff --git a/drivers/media/common/videobuf2/videobuf2-vmalloc.c b/drivers/media/common/videobuf2/videobuf2-vmalloc.c
+index 3f777068c..1d9ca3e0f 100644
+--- a/drivers/media/common/videobuf2/videobuf2-vmalloc.c
++++ b/drivers/media/common/videobuf2/videobuf2-vmalloc.c
+@@ -199,7 +199,12 @@ static int vb2_vmalloc_mmap(void *buf_priv, struct vm_area_struct *vma)
+ 	return 0;
+ }
+ 
+-#ifdef CONFIG_HAS_DMA
++/*
++ * Without CONFIG_DMA_SHARED_BUFFER (a kernel built without dma-buf, the
++ * modules built separately), no DMABUF support: the ops below stay NULL
++ * and videobuf2-core refuses DMABUF queues and exports.
++ */
++#if defined(CONFIG_HAS_DMA) && defined(CONFIG_DMA_SHARED_BUFFER)
+ /*********************************************/
+ /*         DMABUF ops for exporters          */
+ /*********************************************/
+@@ -358,9 +363,9 @@ static struct dma_buf *vb2_vmalloc_get_dmabuf(struct vb2_buffer *vb,
+ 
+ 	return dbuf;
+ }
+-#endif /* CONFIG_HAS_DMA */
+-
++#endif /* CONFIG_HAS_DMA && CONFIG_DMA_SHARED_BUFFER */
+ 
++#ifdef CONFIG_DMA_SHARED_BUFFER
+ /*********************************************/
+ /*       callbacks for DMABUF buffers        */
+ /*********************************************/
+@@ -420,12 +425,14 @@ static void *vb2_vmalloc_attach_dmabuf(struct vb2_buffer *vb,
+ 	return buf;
+ }
+ 
++#endif /* CONFIG_DMA_SHARED_BUFFER */
+ 
+ const struct vb2_mem_ops vb2_vmalloc_memops = {
+ 	.alloc		= vb2_vmalloc_alloc,
+ 	.put		= vb2_vmalloc_put,
+ 	.get_userptr	= vb2_vmalloc_get_userptr,
+ 	.put_userptr	= vb2_vmalloc_put_userptr,
++#ifdef CONFIG_DMA_SHARED_BUFFER
+ #ifdef CONFIG_HAS_DMA
+ 	.get_dmabuf	= vb2_vmalloc_get_dmabuf,
+ #endif
+@@ -433,6 +440,7 @@ const struct vb2_mem_ops vb2_vmalloc_memops = {
+ 	.unmap_dmabuf	= vb2_vmalloc_unmap_dmabuf,
+ 	.attach_dmabuf	= vb2_vmalloc_attach_dmabuf,
+ 	.detach_dmabuf	= vb2_vmalloc_detach_dmabuf,
++#endif
+ 	.vaddr		= vb2_vmalloc_vaddr,
+ 	.mmap		= vb2_vmalloc_mmap,
+ 	.num_users	= vb2_vmalloc_num_users,

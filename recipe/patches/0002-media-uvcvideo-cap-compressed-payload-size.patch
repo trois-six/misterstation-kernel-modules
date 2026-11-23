@@ -1,0 +1,21 @@
+diff --git a/drivers/media/usb/uvc/uvc_video.c b/drivers/media/usb/uvc/uvc_video.c
+index ec76595f3..26a80bc68 100644
+--- a/drivers/media/usb/uvc/uvc_video.c
++++ b/drivers/media/usb/uvc/uvc_video.c
+@@ -271,6 +271,16 @@ static void uvc_fixup_video_ctrl(struct uvc_streaming *stream,
+ 				     stream->maxpsize);
+ 		ctrl->dwMaxPayloadTransferSize = stream->maxpsize;
+ 	}
++
++	/*
++	 * Allows 2 video devices (two Sinden lightguns) to share a usb
++	 * controller by reducing bandwidth if the video stream is compressed
++	 * (MiSTer Linux-Kernel_MiSTer PR 117). Applied as a cap so that a
++	 * smaller endpoint limit set above is never raised.
++	 */
++	if (format->flags & UVC_FMT_FLAG_COMPRESSED &&
++	    ctrl->dwMaxPayloadTransferSize > 0x400)
++		ctrl->dwMaxPayloadTransferSize = 0x400;
+ }
+ 
+ static size_t uvc_video_ctrl_size(struct uvc_streaming *stream)

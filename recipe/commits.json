@@ -1,0 +1,10 @@
+{
+  "comment": "Kernels whose Linux-Kernel_MiSTer commit is pinned (by the id of their /proc/version: the first 16 hex digits of its SHA-256) instead of found by find-commit.sh. Needed only when find-commit.sh cannot tell the commit (a kernel built from a commit pushed later with an older date, or from another branch). The first entry records the mapping checked by hand for linux_release_20260912.",
+  "kernels": {
+    "3a53fb98bca8210a": {
+      "kernel_release": "6.18.38-MiSTer",
+      "linux_release": "260912",
+      "commit": "6a581bac47c32dfd2525f9874fd263cf08058610"
+    }
+  }
+}
