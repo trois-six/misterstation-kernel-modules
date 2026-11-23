@@ -1,0 +1,10 @@
+{
+  "distribution_db": "https://raw.githubusercontent.com/MiSTer-devel/Distribution_MiSTer/main/db.json.zip",
+  "keep": 3,
+  "database": {
+    "db_id": "misterstation_kernel_modules",
+    "branch": "db",
+    "folder": "linux_modules",
+    "tags": ["essential", "linuxmodules", "sinden", "lightgun"]
+  }
+}
