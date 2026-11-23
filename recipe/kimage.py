@@ -88,8 +88,18 @@ def banner(image: bytes) -> str:
     return m.group(0).decode("ascii", "replace")
 
 
+# The release names the tag of the build, the folder of the Downloader
+# database and so the folder on the user's SD card: it comes from a kernel
+# image downloaded from the network, and only the characters the database
+# accepts are allowed (scripts/check-db.py's folder pattern).
+RELEASE_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}")
+
+
 def release(image: bytes) -> str:
-    return banner(image).split()[2]
+    rel = banner(image).split()[2]
+    if not RELEASE_RE.fullmatch(rel):
+        sys.exit(f"kimage: unexpected kernel release {rel!r}")
+    return rel
 
 
 def vermagic(image: bytes) -> str:

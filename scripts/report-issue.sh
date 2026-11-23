@@ -7,8 +7,10 @@
 # Needs GH_TOKEN (issues: write) and GH_REPO.
 set -euo pipefail
 action=$1 title=$2
-existing=$(gh issue list --state open --limit 200 --json number,title \
-  --jq ".[] | select(.title == \"$title\") | .number" | head -n1)
+# the title through the environment: it holds a kernel release or a
+# version read from a downloaded database, not a jq expression
+existing=$(TITLE="$title" gh issue list --state open --limit 200 --json number,title \
+  --jq '.[] | select(.title == $ENV.TITLE) | .number' | head -n1)
 case $action in
   open)
     body=$3 label=$4
