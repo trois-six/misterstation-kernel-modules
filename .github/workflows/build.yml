@@ -1,0 +1,378 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: build
+
+# Once a day, reads the Linux release MiSTer's Downloader installs (the
+# `linux` entry of Distribution_MiSTer's database). When it is new, or the
+# recipe (recipe/) changed since it was built: downloads it, builds the
+# V4L2/UVC modules for its kernel (recipe/build.sh --abi-check, which also
+# checks every module: vermagic equal to the stock kernel's, every
+# undefined symbol exported by the stock kernel), and publishes them as a
+# release with the corresponding source. Every run then regenerates the
+# Downloader database (db.json.zip on the `db` branch) from the index of
+# the newest kernels, validates it with Downloader's own code, installs it
+# with Downloader, and publishes it when it changed. A failed build, patch
+# or database opens an issue.
+on:
+  push:
+    branches: [main]
+    paths: ["recipe/**", "scripts/**", "config.json", ".github/workflows/build.yml"]
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even if this kernel was built with this recipe
+        type: boolean
+        default: false
+      linux_url:
+        description: "A MiSTer-devel linux_release_<YYYYMMDD>.7z URL to build for (default: Distribution's)"
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: build-modules
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+jobs:
+  detect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      build: ${{ steps.detect.outputs.build }}
+      url: ${{ steps.detect.outputs.url }}
+      version: ${{ steps.detect.outputs.version }}
+      md5: ${{ steps.detect.outputs.md5 }}
+      recipe: ${{ steps.detect.outputs.recipe }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read Distribution's Linux release and the published index
+        id: detect
+        env:
+          FORCE: ${{ inputs.force }}
+          LINUX_URL: ${{ inputs.linux_url }}
+        run: |
+          set -euo pipefail
+          branch=$(jq -r .database.branch config.json)
+          if git fetch --depth 1 origin "$branch" 2>/dev/null; then
+            git show FETCH_HEAD:index.json > "$RUNNER_TEMP/index.json" || rm -f "$RUNNER_TEMP/index.json"
+          fi
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/distribution.zip" "$(jq -r .distribution_db config.json)"
+          recipe=$(git rev-parse HEAD:recipe)
+          args=("$RUNNER_TEMP/distribution.zip" "$RUNNER_TEMP/index.json" "$recipe" --linux-url "${LINUX_URL:-}")
+          [ "${FORCE:-false}" = true ] && args+=(--force)
+          python3 -I scripts/detect.py "${args[@]}" > "$RUNNER_TEMP/detect.json"
+          cat "$RUNNER_TEMP/detect.json"
+          jq -r '"build=\(.build)", "url=\(.url)", "version=\(.version)", "md5=\(.md5)"' \
+            "$RUNNER_TEMP/detect.json" >> "$GITHUB_OUTPUT"
+          echo "recipe=$recipe" >> "$GITHUB_OUTPUT"
+          echo "linux_release $(jq -r .version "$RUNNER_TEMP/detect.json"): $(jq -r .reason "$RUNNER_TEMP/detect.json")" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: detect
+    if: needs.detect.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      VERSION: ${{ needs.detect.outputs.version }}
+      RECIPE: ${{ needs.detect.outputs.recipe }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain
+        run: |
+          scripts/free-disk.sh
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            gcc-10-arm-linux-gnueabihf binutils-arm-linux-gnueabihf \
+            make flex bison bc libssl-dev libelf-dev lz4 lzop p7zip-full jq
+      - name: Download the Linux release
+        env:
+          URL: ${{ needs.detect.outputs.url }}
+          MD5: ${{ needs.detect.outputs.md5 }}
+        run: |
+          set -euo pipefail
+          mkdir -p target/stock
+          curl -fsSL --retry 3 -o target/stock/linux.7z "$URL"
+          if [ -n "$MD5" ]; then
+            echo "$MD5  target/stock/linux.7z" | md5sum -c -
+          fi
+          7z e -y -otarget/stock target/stock/linux.7z files/linux/zImage_dtb >/dev/null
+          rm target/stock/linux.7z
+      - name: Identify the kernel
+        id: kernel
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          z=target/stock/zImage_dtb
+          release=$(python3 -I recipe/kimage.py release "$z")
+          id=$(python3 -I recipe/kimage.py version "$z" | tr -d '\n' | sha256sum | cut -c1-16)
+          build_time=$(python3 -I recipe/kimage.py builddate "$z")
+          {
+            echo "release=$release"
+            echo "id=$id"
+            echo "build_time=$build_time"
+            echo "tag=${release}_${id}_${RECIPE:0:8}"
+          } >> "$GITHUB_OUTPUT"
+          echo "kernel $release (id $id) built $build_time" | tee -a "$GITHUB_STEP_SUMMARY"
+          branch=$(jq -r .database.branch config.json)
+          built=false
+          if [ "${FORCE:-false}" != true ] && git fetch --depth 1 origin "$branch" 2>/dev/null \
+             && git show FETCH_HEAD:index.json > index.json 2>/dev/null \
+             && jq -e --arg id "$id" --arg r "$RECIPE" '.builds[] | select(.id == $id and .recipe == $r)' index.json >/dev/null; then
+            # The same kernel in another Linux release: only its version is recorded.
+            built=true
+            mkdir -p record
+            jq -n --arg id "$id" --arg v "$VERSION" '{seen: {id: $id, linux_release: $v}}' > record/record.json
+            echo "already built with this recipe: linux_release $VERSION recorded" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "built=$built" >> "$GITHUB_OUTPUT"
+      - name: Build and check the modules
+        if: steps.kernel.outputs.built == 'false'
+        run: |
+          set -uo pipefail
+          recipe/build.sh --abi-check --linux-release "$VERSION" --recipe "$RECIPE" \
+            --out target/package target/stock/zImage_dtb 2>&1 | tee target/build.log
+          status=${PIPESTATUS[0]}
+          [ "$status" -ne 3 ] || touch target/patch-failed
+          exit "$status"
+      - name: Corresponding source
+        if: steps.kernel.outputs.built == 'false'
+        run: |
+          set -euo pipefail
+          # The exact kernel tree the modules were built from (the commit
+          # plus recipe/patches), and this repository's recipe at this run.
+          tree=target/work/src
+          commit=$(git -C "$tree" rev-parse HEAD)
+          git -C "$tree" add -A
+          git -C "$tree" -c user.name=build -c user.email=build@localhost \
+            commit -q -m "recipe/patches applied"
+          git -C "$tree" archive --format=tar.gz --prefix="linux-${commit:0:12}/" \
+            -o "$GITHUB_WORKSPACE/target/linux-source-${commit:0:12}.tar.gz" HEAD
+          git archive --format=tar.gz --prefix=misterstation-kernel-modules/ \
+            -o target/recipe.tar.gz HEAD
+      - name: Publish the release
+        if: steps.kernel.outputs.built == 'false'
+        env:
+          TAG: ${{ steps.kernel.outputs.tag }}
+          RELEASE: ${{ steps.kernel.outputs.release }}
+          BUILD_TIME: ${{ steps.kernel.outputs.build_time }}
+        run: |
+          set -euo pipefail
+          mkdir -p record
+          python3 -I scripts/record.py target/package "$TAG" "$BUILD_TIME" "$VERSION" record/record.json
+          m=target/package/manifest.json
+          {
+            echo "V4L2/UVC kernel modules (a Sinden light gun's camera) for the stock MiSTer kernel **$RELEASE** of linux_release $VERSION."
+            echo
+            echo "| | |"; echo "|---|---|"
+            echo "| /proc/version | \`$(jq -r .proc_version "$m")\` |"
+            echo "| vermagic | \`$(jq -r .vermagic "$m")\` |"
+            echo "| zImage_dtb sha256 | \`$(jq -r .zimage_sha256 "$m")\` |"
+            echo "| load order | $(jq -r '[.modules[].file] | join(", ")' "$m") |"
+            echo "| run | $RUN_URL |"
+            echo
+            echo "Install them with the Downloader database (see the README), not by hand: it puts them in \`linux_modules/$RELEASE/$(jq -r .id "$m")/\`."
+            echo
+            echo "Corresponding source (GPL-2.0): \`linux-source-*.tar.gz\`, the kernel tree the modules were built from ($(jq -r .source "$m") commit $(jq -r .source_commit "$m") with recipe/patches applied), and \`recipe.tar.gz\`, this repository at the commit that built them."
+          } > target/notes.md
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" --target "$GITHUB_SHA" --latest=false \
+            --title "$RELEASE (linux_release $VERSION)" --notes-file target/notes.md \
+            target/package/manifest.json target/package/*.ko target/linux-source-*.tar.gz target/recipe.tar.gz
+          cat record/record.json
+      - name: Upload the build record
+        uses: actions/upload-artifact@v7
+        with:
+          name: record
+          path: record/record.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Close the failure issues
+        env:
+          RELEASE: ${{ steps.kernel.outputs.release }}
+        run: |
+          scripts/report-issue.sh close "Build failed: linux_release $VERSION" "Built in $RUN_URL."
+          scripts/report-issue.sh close "Patch does not apply: $RELEASE" "The patches apply again ($RUN_URL)."
+      - name: Upload the log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-log
+          path: target/build.log
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Open an issue
+        if: failure() || cancelled()
+        env:
+          RELEASE: ${{ steps.kernel.outputs.release }}
+        run: |
+          {
+            if [ -f target/patch-failed ]; then
+              echo "A patch of \`recipe/patches/\` does not apply to the source of the kernel **$RELEASE** of linux_release $VERSION: port it to the new kernel."
+            else
+              echo "Building the modules for linux_release $VERSION (kernel ${RELEASE:-unknown}) failed (or hit the timeout)."
+            fi
+            echo; echo "Run: $RUN_URL (log in the \`build-log\` artifact)"
+            if [ -f target/build.log ]; then
+              echo; echo '```'; tail -n 30 target/build.log; echo '```'
+            fi
+          } > "$RUNNER_TEMP/body.md"
+          if [ -f target/patch-failed ]; then
+            scripts/report-issue.sh open "Patch does not apply: $RELEASE" "$RUNNER_TEMP/body.md" patch-failure
+          else
+            scripts/report-issue.sh open "Build failed: linux_release $VERSION" "$RUNNER_TEMP/body.md" build-failure
+          fi
+
+  database:
+    # Regenerated from the index on every run, built or not, and pushed
+    # only when it changed. A failed build leaves it as it was.
+    needs: [detect, build]
+    if: always() && !cancelled() && needs.detect.result == 'success' && needs.build.result != 'failure'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download the build record
+        if: needs.build.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: record
+          path: ${{ runner.temp }}/record
+      - name: Update the index and generate the database
+        id: make
+        run: |
+          set -euo pipefail
+          branch=$(jq -r .database.branch config.json)
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          old="$RUNNER_TEMP/old"
+          mkdir -p "$old"
+          if git fetch --depth 1 origin "$branch" 2>/dev/null; then
+            git show FETCH_HEAD:index.json > "$old/index.json" || rm -f "$old/index.json"
+            git show FETCH_HEAD:db.json > "$old/db.json" || rm -f "$old/db.json"
+          fi
+          rec=()
+          [ ! -f "$RUNNER_TEMP/record/record.json" ] || rec=("$RUNNER_TEMP/record/record.json")
+          if [ ! -f "$old/index.json" ] && [ ${#rec[@]} -eq 0 ]; then
+            echo "nothing built yet: no database"
+            echo "state=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/db"
+          python3 -I scripts/update-index.py "$old/index.json" "$RUNNER_TEMP/db/index.json" "$(jq -r .keep config.json)" "${rec[@]}"
+          state=$(python3 -I scripts/make-db.py "$RUNNER_TEMP/db/index.json" "$RUNNER_TEMP/db" "$old/db.json")
+          if [ "$state" = unchanged ] && [ -f "$old/index.json" ] \
+             && ! cmp -s <(jq -S .builds "$old/index.json") <(jq -S .builds "$RUNNER_TEMP/db/index.json"); then
+            state=changed
+          fi
+          [ "$state" = changed ] || cp "$old/index.json" "$RUNNER_TEMP/db/index.json"
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "database: $state"
+      - name: Check the database (format, Downloader's own validation)
+        if: steps.make.outputs.state != 'none'
+        run: |
+          git clone --quiet --depth 1 https://github.com/MiSTer-devel/Downloader_MiSTer "$RUNNER_TEMP/downloader"
+          echo "Downloader_MiSTer at $(git -C "$RUNNER_TEMP/downloader" rev-parse HEAD)"
+          python3 -I scripts/check-db.py "$RUNNER_TEMP/db/db.json.zip" --index "$RUNNER_TEMP/db/index.json" \
+            --downloader "$RUNNER_TEMP/downloader"
+      - name: Install it with Downloader
+        # Downloader's PC launcher mode installs into a scratch directory
+        # from the database served locally, downloading every file from
+        # its release with Downloader's MD5 and size checks: every file
+        # must be installed, and nothing else.
+        if: steps.make.outputs.state != 'none'
+        run: |
+          set -euo pipefail
+          sd="$RUNNER_TEMP/sd"
+          mkdir -p "$sd" "$RUNNER_TEMP/srv"
+          cp "$RUNNER_TEMP/db/db.json.zip" "$RUNNER_TEMP/srv/"
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory "$RUNNER_TEMP/srv" >/dev/null 2>&1 &
+          printf '[%s]\ndb_url = http://127.0.0.1:8765/db.json.zip\n' "$(jq -r .database.db_id config.json)" > "$sd/downloader.ini"
+          touch "$sd/downloader_pc_launcher.py"
+          sleep 1
+          (cd "$sd" && PC_LAUNCHER="$sd/downloader_pc_launcher.py" timeout 600 python3 "$RUNNER_TEMP/downloader/src/__main__.py")
+          python3 -I - "$RUNNER_TEMP/db/db.json" "$sd" "$(jq -r .database.folder config.json)" <<'PY'
+          import hashlib, json, os, sys
+          db, sd, folder = json.load(open(sys.argv[1])), sys.argv[2], sys.argv[3]
+          bad = []
+          for path, d in db["files"].items():
+              p = os.path.join(sd, path)
+              if not os.path.isfile(p) or hashlib.md5(open(p, "rb").read()).hexdigest() != d["hash"]:
+                  bad.append(path)
+          found = {os.path.relpath(os.path.join(r, f), sd) for r, _, fs in os.walk(os.path.join(sd, folder)) for f in fs}
+          extra = found - set(db["files"])
+          if bad or extra:
+              sys.exit(f"::error::Downloader did not install the database as expected: missing {bad}, extra {sorted(extra)}")
+          print(f"Downloader installed the {len(db['files'])} files")
+          PY
+      - name: Publish the database
+        if: steps.make.outputs.state == 'changed'
+        env:
+          BRANCH: ${{ steps.make.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          wt="$RUNNER_TEMP/dbbranch"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            git fetch --depth 1 origin "$BRANCH"
+            git worktree add "$wt" FETCH_HEAD
+          else
+            git worktree add --detach "$wt"
+            git -C "$wt" checkout --orphan "$BRANCH"
+            git -C "$wt" rm -rfq .
+          fi
+          cp "$RUNNER_TEMP/db/db.json" "$RUNNER_TEMP/db/db.json.zip" "$RUNNER_TEMP/db/index.json" "$wt/"
+          url="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$BRANCH/db.json.zip"
+          printf '%s\n' "# Downloader database" "" \
+            "Generated by the build workflow of the main branch; do not edit." \
+            "Add it to \`downloader.ini\` with \`db_url = '$url'\` (see the README of the main branch)." \
+            "\`index.json\` lists the builds the database holds (the newest kernels)." > "$wt/README.md"
+          git -C "$wt" add db.json db.json.zip index.json README.md
+          n=$(jq '.builds | length' "$wt/index.json")
+          git -C "$wt" commit -q -m "chore(db): update the database ($n kernels)" -m "Run: $RUN_URL"
+          git -C "$wt" push origin "HEAD:refs/heads/$BRANCH"
+      - name: Check the published database
+        if: steps.make.outputs.state != 'none'
+        env:
+          BRANCH: ${{ steps.make.outputs.branch }}
+        run: |
+          set -euo pipefail
+          gh api -H "Accept: application/vnd.github.raw" "repos/$GH_REPO/contents/db.json.zip?ref=$BRANCH" > "$RUNNER_TEMP/published.zip"
+          unzip -p "$RUNNER_TEMP/published.zip" db.json | cmp - "$RUNNER_TEMP/db/db.json"
+          python3 -I scripts/check-db.py "$RUNNER_TEMP/published.zip" --index "$RUNNER_TEMP/db/index.json"
+          echo "Database: https://raw.githubusercontent.com/$GH_REPO/$BRANCH/db.json.zip ($(jq -r '"\(.files | length) files, timestamp \(.timestamp)"' "$RUNNER_TEMP/db/db.json"))" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Prune old builds
+        # Keeps the releases of the builds the index lists (the newest
+        # kernels, config.json's keep); older ones and their tags go.
+        if: steps.make.outputs.state != 'none'
+        run: |
+          set -euo pipefail
+          gh release list --limit 1000 --json tagName > "$RUNNER_TEMP/releases.json"
+          python3 -I - "$RUNNER_TEMP/releases.json" "$RUNNER_TEMP/db/index.json" > "$RUNNER_TEMP/prune" <<'PY'
+          import json, re, sys
+          keep = {b["tag"] for b in json.load(open(sys.argv[2]))["builds"]}
+          for r in json.load(open(sys.argv[1])):
+              if re.search(r"_[0-9a-f]{16}_[0-9a-f]{8}$", r["tagName"]) and r["tagName"] not in keep:
+                  print(r["tagName"])
+          PY
+          while read -r tag; do
+            echo "deleting $tag"
+            gh release delete "$tag" --cleanup-tag --yes
+          done < "$RUNNER_TEMP/prune"
+          scripts/report-issue.sh close "Database check failed" "The database is valid again ($RUN_URL)."
+      - name: Open an issue
+        if: failure()
+        run: |
+          printf '%s\n' "The Downloader database could not be generated, validated or published; the published one is unchanged." \
+            "" "Run: $RUN_URL" > "$RUNNER_TEMP/body.md"
+          scripts/report-issue.sh open "Database check failed" "$RUNNER_TEMP/body.md" database-failure
