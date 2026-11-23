@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "generated_at": "2026-11-23T08:24:18Z",
+  "generated_at": "2026-11-23T10:36:38Z",
   "builds": [
     {
       "id": "3a53fb98bca8210a",
@@ -12,74 +12,74 @@
         "260912"
       ],
       "source_commit": "6a581bac47c32dfd2525f9874fd263cf08058610",
-      "recipe": "417caceda6e1d5231497b67c4cab9c0d687d3b82",
-      "recipe_commit": "3d6e8fd49c8599c2c3bca8fcbc9321c53d155938",
-      "tag": "6.18.38-MiSTer_3a53fb98bca8210a_417caced",
-      "built_at": "2026-11-23T08:23:55Z",
-      "run_url": "https://github.com/trois-six/misterstation-kernel-modules/actions/runs/45136193511",
+      "recipe": "99b73bcfd6ccc7c6e25c63da113358e22a631e6f",
+      "recipe_commit": "a9df231f6fd5cb3f0c89a4b4ba435ef439783ab5",
+      "tag": "6.18.38-MiSTer_3a53fb98bca8210a_99b73bcf",
+      "built_at": "2026-11-23T10:36:08Z",
+      "run_url": "https://github.com/trois-six/misterstation-kernel-modules/actions/runs/45153256519",
       "files": [
         {
           "name": "mc.ko",
           "size": 51988,
           "md5": "6db01c550f2c9b51b540f1a2695bcd43",
           "sha256": "b35afdf00861957e4f3ac137311eeb1dea5833a042f0488857cfb4aeea4961ca",
-          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_417caced/mc.ko"
+          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_99b73bcf/mc.ko"
         },
         {
           "name": "uvc.ko",
           "size": 3912,
           "md5": "ee91cc6a6f3e5a81fad6858859b94aae",
           "sha256": "a5d403b629e3c53a0deee6ae7e9f9f9c8c7b51e08ee64b3f322a869cafbd2963",
-          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_417caced/uvc.ko"
+          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_99b73bcf/uvc.ko"
         },
         {
           "name": "videobuf2-common.ko",
           "size": 62308,
           "md5": "1c254c5bef71c767502659081690b458",
           "sha256": "1632e9405a5d69a3b9e3f396b59b730f356b0c7c8602bda4b2d4701c79755bb7",
-          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_417caced/videobuf2-common.ko"
+          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_99b73bcf/videobuf2-common.ko"
         },
         {
           "name": "videobuf2-memops.ko",
           "size": 4604,
           "md5": "57e3ee3957b8b2d331975ab3853fc5dd",
           "sha256": "78d8d68b166b8d9eff57b9e1fa2ab20190b9a1b0c8f1061fcbc2c0bd60b96577",
-          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_417caced/videobuf2-memops.ko"
+          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_99b73bcf/videobuf2-memops.ko"
         },
         {
           "name": "videobuf2-vmalloc.ko",
           "size": 6664,
           "md5": "da116621a78319fed3c36c6f06ea0bed",
           "sha256": "def3c1b307efa261b5fd52cee99453466907c4a79421ed783367d5a7cde60c63",
-          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_417caced/videobuf2-vmalloc.ko"
+          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_99b73bcf/videobuf2-vmalloc.ko"
         },
         {
           "name": "videodev.ko",
           "size": 325652,
           "md5": "b34068734676621cfc829d3cf7450bb5",
           "sha256": "a769425d5102b2b8b34346f854ce9ebebcac54f3cb23ce653566cbb4adf5e619",
-          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_417caced/videodev.ko"
+          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_99b73bcf/videodev.ko"
         },
         {
           "name": "videobuf2-v4l2.ko",
           "size": 29344,
           "md5": "9931ebd0b60ab5dd935d383bcaa9b39f",
           "sha256": "25a959594ec3679be845c7cab850961f319c288c91f821423851d6a1b490c5c1",
-          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_417caced/videobuf2-v4l2.ko"
+          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_99b73bcf/videobuf2-v4l2.ko"
         },
         {
           "name": "uvcvideo.ko",
           "size": 132632,
           "md5": "75aad8e6f495aa27d91c4638db557f40",
           "sha256": "16ed132fe4cab26705b1a2d08d9d9830d734dd05e8418adc7b2919da4675659b",
-          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_417caced/uvcvideo.ko"
+          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_99b73bcf/uvcvideo.ko"
         },
         {
           "name": "manifest.json",
           "size": 1851,
-          "md5": "6a2858c32a53dbeabb67c052687f8483",
-          "sha256": "8a72b4b80c8cb0785665647b4c7de3a1b1c9560459510ed03866ee18766ad559",
-          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_417caced/manifest.json"
+          "md5": "e8c13551f3eedd6d7c5decaad4dc5998",
+          "sha256": "8911fe6f09e092c1b09dfb04ba113373e2f0bd45f26a6a65e621e24ca3312ed5",
+          "url": "https://github.com/trois-six/misterstation-kernel-modules/releases/download/6.18.38-MiSTer_3a53fb98bca8210a_99b73bcf/manifest.json"
         }
       ]
     }
